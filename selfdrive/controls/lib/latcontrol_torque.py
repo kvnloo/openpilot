@@ -45,8 +45,8 @@ class LatControlTorque(LatControl):
     self.lat_accel_request_buffer_len = int(LAT_ACCEL_REQUEST_BUFFER_SECONDS / self.dt)
     self.lat_accel_request_buffer = deque([0.] * self.lat_accel_request_buffer_len , maxlen=self.lat_accel_request_buffer_len)
     self.jerk_filter = FirstOrderFilter(0.0, 1 / (2 * np.pi * LP_FILTER_CUTOFF_HZ), self.dt)
-    self.measurement_rate_filter = FirstOrderFilter(0.0, 1 / (2 * np.pi * LP_FILTER_CUTOFF_HZ), self.dt)
-    self.previous_measurement = 0.0
+    self.error_rate_filter = FirstOrderFilter(0.0, 1 / (2 * np.pi * LP_FILTER_CUTOFF_HZ), self.dt)
+    self.previous_error = 0.0
 
   def update_live_torque_params(self, latAccelFactor, latAccelOffset, friction):
     self.torque_params.latAccelFactor = latAccelFactor
@@ -81,10 +81,9 @@ class LatControlTorque(LatControl):
       setpoint = expected_lateral_accel
 
       measurement = measured_curvature * CS.vEgo ** 2
-      measurement_rate = self.measurement_rate_filter.update((measurement - self.previous_measurement) / self.dt)
-      self.previous_measurement = measurement
-
       error = setpoint - measurement
+      error_rate = self.error_rate_filter.update((error - self.previous_error) / self.dt)
+      self.previous_error = error
 
       # do error correction in lateral acceleration space, convert at end to handle non-linear torque responses correctly
       pid_log.error = float(error)
@@ -94,7 +93,7 @@ class LatControlTorque(LatControl):
       ff += get_friction(error + JERK_GAIN * desired_lateral_jerk, lateral_accel_deadzone, FRICTION_THRESHOLD, self.torque_params)
 
       freeze_integrator = steer_limited_by_safety or CS.steeringPressed or CS.vEgo < 5
-      output_lataccel = self.pid.update(pid_log.error, -measurement_rate, CS.vEgo, ff, freeze_integrator)
+      output_lataccel = self.pid.update(pid_log.error, error_rate, CS.vEgo, ff, freeze_integrator)
       output_torque = self.torque_from_lateral_accel(output_lataccel, self.torque_params)
 
       pid_log.active = True
